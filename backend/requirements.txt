@@ -1,0 +1,4 @@
+fastapi            #Backend framework
+uvicorn            #Runs the server
+openai             #AI itinerary generation
+python-dotenv      #Loads API key from .env
