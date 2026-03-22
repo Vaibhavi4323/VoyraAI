@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import uvicorn
 from planner_agent import generate_itinerary
+from budget_agent import optimize_budget
 
 app = FastAPI(
     title="VoyraAI - AI Travel Planner",
@@ -48,6 +49,7 @@ class TripResponse(BaseModel):
     tokens_used: Optional[int] = None
     model: Optional[str] = None
     error: Optional[str] = None
+    budget_breakdown: Optional[dict] = None  
 
 
 # --- Routes ---
@@ -66,11 +68,6 @@ def health_check():
 def plan_trip(data: TripRequest = Body(...)):
     """
     Generate a personalized travel itinerary.
-    
-    - **destination**: Where you want to travel
-    - **days**: How many days (1–30)
-    - **budget**: budget / mid-range / luxury
-    - **interests**: Your travel interests (food, hiking, history, etc.)
     """
 
     # Validate budget value
@@ -81,6 +78,7 @@ def plan_trip(data: TripRequest = Body(...)):
             detail=f"Invalid budget. Choose from: {', '.join(valid_budgets)}"
         )
 
+    # ✅ Step 1: Generate itinerary
     result = generate_itinerary(
         destination=data.destination,
         days=data.days,
@@ -94,7 +92,29 @@ def plan_trip(data: TripRequest = Body(...)):
             detail=result.get("error", "Failed to generate itinerary")
         )
 
-    return TripResponse(**result)
+    # ✅ Step 2: Budget Optimization
+    budget_value_map = {
+        "budget": 5000,
+        "mid-range": 15000,
+        "luxury": 40000
+    }
+
+    numeric_budget = budget_value_map.get(data.budget, 10000)
+
+    optimized = optimize_budget(
+        itinerary=result["itinerary"],
+        budget=numeric_budget,
+        days=data.days
+    )
+
+    # ✅ Step 3: Merge outputs
+    final_response = {
+        **result,
+        "budget_breakdown": optimized["budget_breakdown"]
+    }
+
+    return final_response
+    
 
 
 @app.get("/sample-destinations")
