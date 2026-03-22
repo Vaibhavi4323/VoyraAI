@@ -1,24 +1,29 @@
-from openai import OpenAI
-import os
-from dotenv import load_dotenv
+import requests
+import json
 
-load_dotenv()
+# Ollama call
+def call_ollama(prompt):
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "mistral",
+                "prompt": prompt,
+                "stream": False
+            },
+            timeout=60
+        )
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        result = response.json()["response"].strip()
+
+        return result  # keep as text (same as OpenAI behavior)
+
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 
 def generate_itinerary(destination: str, days: int, budget: str = "budget", interests: list = None) -> dict:
-    """
-    Generate a detailed travel itinerary using OpenAI GPT.
-    
-    Args:
-        destination: Travel destination
-        days: Number of days for the trip
-        budget: Budget level - 'budget', 'mid-range', or 'luxury'
-        interests: List of interests e.g. ['food', 'history', 'adventure']
-    
-    Returns:
-        Dictionary with itinerary and metadata
-    """
+
     interests_str = ", ".join(interests) if interests else "general sightseeing"
 
     system_prompt = """You are an expert travel planner specializing in student and budget travel. 
@@ -71,17 +76,11 @@ def generate_itinerary(destination: str, days: int, budget: str = "budget", inte
     """
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=3000,
-            temperature=0.7,
-        )
+        #  Merge prompts (important for Ollama)
+        full_prompt = system_prompt + "\n\n" + user_prompt
 
-        itinerary_text = response.choices[0].message.content or "No itinerary generated."
+        # Replace OpenAI call
+        itinerary_text = call_ollama(full_prompt) or "No itinerary generated."
 
         return {
             "success": True,
@@ -90,8 +89,8 @@ def generate_itinerary(destination: str, days: int, budget: str = "budget", inte
             "budget": budget,
             "interests": interests or [],
             "itinerary": itinerary_text,
-            "tokens_used": getattr(response.usage,"total_tokens",None),
-            "model": response.model
+            "tokens_used": None,   # ❌ not available in Ollama
+            "model": "mistral"     # ✅ manually set
         }
 
     except Exception as e:
@@ -104,31 +103,31 @@ def generate_itinerary(destination: str, days: int, budget: str = "budget", inte
 
 
 def display_itinerary(result: dict) -> None:
-    """Display the itinerary in a formatted way."""
     if not result["success"]:
-        print(f"❌ Error generating itinerary: {result['error']}")
+        print(f"Error generating itinerary: {result['error']}")
         return
 
     print("\n" + "="*60)
-    print(f"✈️  TRAVEL ITINERARY: {result['destination'].upper()}")
-    print(f"📅 Duration: {result['days']} days | 💰 Budget: {result['budget'].title()}")
+    print(f" TRAVEL ITINERARY: {result['destination'].upper()}")
+    print(f" Duration: {result['days']} days | 💰 Budget: {result['budget'].title()}")
+
     if result["interests"]:
-        print(f"🎯 Interests: {', '.join(result['interests'])}")
+        print(f" Interests: {', '.join(result['interests'])}")
+
     print("="*60)
     print(result["itinerary"])
     print("="*60)
-    print(f"📊 Tokens used: {result['tokens_used']} | Model: {result['model']}")
+    print(f" Tokens used: {result['tokens_used']} | Model: {result['model']}")
     print("="*60 + "\n")
 
 
 def interactive_planner():
-    """Interactive CLI for trip planning."""
-    print("\n🌍 Welcome to AI Travel Planner!")
+    print("\n Welcome to AI Travel Planner!")
     print("-" * 40)
 
     destination = input("Enter your destination: ").strip()
     if not destination:
-        print("❌ Destination cannot be empty.")
+        print(" Destination cannot be empty.")
         return
 
     try:
@@ -136,7 +135,7 @@ def interactive_planner():
         if days <= 0:
             raise ValueError
     except ValueError:
-        print("❌ Please enter a valid number of days.")
+        print(" Please enter a valid number of days.")
         return
 
     print("Budget options: budget / mid-range / luxury")
@@ -144,7 +143,7 @@ def interactive_planner():
     if budget not in ["budget", "mid-range", "luxury"]:
         budget = "budget"
 
-    interests_input = input("Your interests (e.g. food, history, hiking) — press Enter to skip: ").strip()
+    interests_input = input("Your interests (e.g. food, history, hiking): ").strip()
     interests = [i.strip() for i in interests_input.split(",")] if interests_input else []
 
     print("\n⏳ Generating your personalized itinerary...\n")
@@ -152,9 +151,7 @@ def interactive_planner():
     display_itinerary(result)
 
 
-# --- Example usage ---
 if __name__ == "__main__":
-    # Option 1: Direct call
     result = generate_itinerary(
         destination="Bali, Indonesia",
         days=5,
@@ -162,6 +159,3 @@ if __name__ == "__main__":
         interests=["beaches", "temples", "food", "surfing"]
     )
     display_itinerary(result)
-
-    # Option 2: Interactive mode (uncomment to use)
-    # interactive_planner()
