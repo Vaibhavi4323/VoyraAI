@@ -4,6 +4,7 @@ function App() {
   const [destination, setDestination] = useState("");
   const [days, setDays] = useState("");
   const [result, setResult] = useState("");
+  const [budget, setBudget] = useState("");
 
   const handleSubmit = async () => {
     const response = await fetch("http://127.0.0.1:8000/plan-trip", {
@@ -11,11 +12,15 @@ function App() {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ destination, days }),
+      body: JSON.stringify({
+        city: destination,
+        days: Number(days),
+        budget: Number(budget),
+      }),
     });
 
     const data = await response.json();
-    setResult(data.itinerary);
+    setResult(data);
   };
 
   return (
@@ -26,17 +31,38 @@ function App() {
         placeholder="Enter Destination"
         onChange={(e) => setDestination(e.target.value)}
       />
-      <br /><br />
+      <br />
+      <br />
 
       <input
         placeholder="Number of Days"
         onChange={(e) => setDays(e.target.value)}
       />
-      <br /><br />
+      <br />
+      <br />
+
+      <input
+        placeholder="Budget"
+        type="number"
+        onChange={(e) => setBudget(e.target.value)}
+      />
+      <br />
+      <br />
 
       <button onClick={handleSubmit}>Generate Plan</button>
 
-      <h2>{result}</h2>
+      {result && (
+        <div>
+          <h2>Trip Plan for {result.city}</h2>
+
+          {result.itinerary.map((day) => (
+            <div key={day.day}>
+              <h3>Day {day.day}</h3>
+              <p>{day.places.join(", ")}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
