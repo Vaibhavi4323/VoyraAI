@@ -12,7 +12,7 @@ from functools import wraps
 from typing import Optional
 
 import googlemaps
-from googlemaps.exceptions import ApiError, ApiException, HTTPError, Timeout
+from googlemaps.exceptions import ApiError, HTTPError, Timeout
 from dotenv import load_dotenv
 
 load_dotenv()
