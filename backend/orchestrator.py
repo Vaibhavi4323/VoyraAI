@@ -84,7 +84,7 @@ def run_trip_pipeline(
         itinerary_text = plan["itinerary"]
 
         # ───────────────── Step 2: Flights ─────────────────
-        if origin_code and dest_code:
+        if False: #origin_code and dest_code :
             try:
                 flights_raw = get_flights(
                     origin=origin_code,
@@ -105,8 +105,14 @@ def run_trip_pipeline(
 
         # ───────────────── Step 3: Hotels ─────────────────
         try:
+            raise Exception("Skipping hotels (no API key)")
+            check_in = get_future_date(7)
+            check_out = get_future_date(7 + days)
+
             hotels_raw = get_hotels(
-                location=destination,
+                city=destination,
+                check_in=check_in,
+                check_out=check_out,
                 max_results=10
             )
 
