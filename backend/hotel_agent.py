@@ -7,11 +7,10 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import date
 from functools import wraps
 from typing import Optional
 
-from amadeus import Client, ResponseError
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,56 +23,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hotel_agent")
 
-# ─────────────────────────── City → IATA Mapping ─────────────────
-
-CITY_TO_CODE = {
-    "delhi": "DEL",
-    "mumbai": "BOM",
-    "goa": "GOI",
-    "bangalore": "BLR",
-    "hyderabad": "HYD",
-    "chennai": "MAA",
-    "kolkata": "CCU"
-}
-
-def _normalize_location(loc: str) -> str:
-    loc = loc.strip().lower()
-    return CITY_TO_CODE.get(loc, loc.upper())
-
 # ─────────────────────────── Exceptions ─────────────────────────
 
 class HotelAgentError(Exception): pass
-class ValidationError(HotelAgentError): pass
 class APIError(HotelAgentError): pass
 class NoHotelsFoundError(HotelAgentError): pass
-
-# ─────────────────────────── Helpers ────────────────────────────
-
-def _validate(city_code: str, check_in: str, check_out: str):
-    if len(city_code) != 3:
-        raise ValidationError("Invalid city IATA code")
-
-    try:
-        ci = date.fromisoformat(check_in)
-        co = date.fromisoformat(check_out)
-        if ci >= co:
-            raise ValidationError("Check-out must be after check-in")
-    except:
-        raise ValidationError("Invalid date format (YYYY-MM-DD required)")
 
 # ─────────────────────────── Data Model ─────────────────────────
 
 @dataclass
-class HotelOffer:
-    hotel_id: str
-    hotel_name: str
-    city_code: str
-    price_total: float
-    currency: str
-    check_in: str
-    check_out: str
-    room_type: Optional[str]
-    bed_type: Optional[str]
+class Hotel:
+    name: str
+    address: str
+    rating: Optional[float]
+    total_reviews: Optional[int]
+    latitude: float
+    longitude: float
 
     def to_dict(self):
         return asdict(self)
@@ -102,67 +67,46 @@ class TTLCache:
     def set(self, params, value):
         self.store[self._key(params)] = (value, time.time() + self.ttl)
 
-# ─────────────────────────── Retry ──────────────────────────────
-
-def with_retry(max_attempts=3):
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            delay = 1
-            for attempt in range(max_attempts):
-                try:
-                    return fn(*args, **kwargs)
-                except ResponseError as e:
-                    status = getattr(e.response, "status_code", None)
-
-                    if status == 429:
-                        logger.warning("Rate limit hit, retrying...")
-                    elif status and 400 <= status < 500:
-                        raise APIError(e)
-
-                    if attempt == max_attempts - 1:
-                        raise APIError(e)
-
-                    time.sleep(delay)
-                    delay *= 2
-        return wrapper
-    return decorator
-
 # ─────────────────────────── Agent ──────────────────────────────
 
 class HotelAgent:
 
+    BASE_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+
     def __init__(self):
-        self.client = Client(
-            client_id=os.getenv("AMADEUS_API_KEY"),
-            client_secret=os.getenv("AMADEUS_API_SECRET")
-        )
+        self.api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+
+        if not self.api_key:
+            raise ValueError("GOOGLE_PLACES_API_KEY not set")
+
         self.cache = TTLCache()
 
-    @with_retry()
     def _call_api(self, params):
-        return self.client.shopping.hotel_offers.get(**params).data
+        try:
+            response = requests.get(self.BASE_URL, params=params)
+            data = response.json()
+
+            if data.get("status") != "OK":
+                raise APIError(data)
+
+            return data.get("results", [])
+
+        except Exception as e:
+            raise APIError(e)
 
     def search(
         self,
         city: str,
-        check_in: str,
-        check_out: str,
-        adults: int = 1,
         max_results: int = 10,
-        max_price: Optional[float] = None,
-        sort_by: str = "price"
+        min_rating: Optional[float] = None
     ):
-        city_code = _normalize_location(city)
 
-        _validate(city_code, check_in, check_out)
+        query = f"hotels in {city}"
 
-        params = dict(
-            cityCode=city_code,
-            checkInDate=check_in,
-            checkOutDate=check_out,
-            adults=adults
-        )
+        params = {
+            "query": query,
+            "key": self.api_key
+        }
 
         cached = self.cache.get(params)
         if cached:
@@ -175,25 +119,20 @@ class HotelAgent:
 
         hotels = []
 
-        for hotel in data:
+        for place in data:
             try:
-                offer = hotel["offers"][0]
+                rating = place.get("rating")
 
-                price = float(offer["price"]["total"])
-
-                if max_price and price > max_price:
+                if min_rating and (rating is None or rating < min_rating):
                     continue
 
-                h = HotelOffer(
-                    hotel_id=hotel["hotel"]["hotelId"],
-                    hotel_name=hotel["hotel"]["name"],
-                    city_code=city_code,
-                    price_total=price,
-                    currency=offer["price"]["currency"],
-                    check_in=check_in,
-                    check_out=check_out,
-                    room_type=offer.get("room", {}).get("typeEstimated"),
-                    bed_type=offer.get("room", {}).get("bedType")
+                h = Hotel(
+                    name=place.get("name"),
+                    address=place.get("formatted_address"),
+                    rating=rating,
+                    total_reviews=place.get("user_ratings_total"),
+                    latitude=place["geometry"]["location"]["lat"],
+                    longitude=place["geometry"]["location"]["lng"]
                 )
 
                 hotels.append(h)
@@ -204,9 +143,6 @@ class HotelAgent:
             except Exception:
                 continue
 
-        if sort_by == "price":
-            hotels.sort(key=lambda x: x.price_total)
-
         self.cache.set(params, hotels)
 
         return hotels
@@ -215,11 +151,16 @@ class HotelAgent:
 
 _agent = None
 
-def get_hotels(city, check_in, check_out, **kwargs):
+def get_hotels(city, **kwargs):
     global _agent
     if _agent is None:
         _agent = HotelAgent()
 
-    hotels = _agent.search(city, check_in, check_out, **kwargs)
+    hotels = _agent.search(city, **kwargs)
 
     return [h.to_dict() for h in hotels]
+
+
+'''
+print("API KEY:", os.getenv("GOOGLE_PLACES_API_KEY"))
+'''

@@ -8,11 +8,9 @@ import math
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from functools import wraps
 from typing import Optional
 
-import googlemaps
-from googlemaps.exceptions import ApiError, HTTPError, Timeout
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,15 +23,15 @@ logger = logging.getLogger("activity_agent")
 # ─────────────────────────── Constants ──────────────────────────
 
 CATEGORIES = {
-    "attractions": "tourist_attraction",
-    "museums": "museum",
-    "parks": "park",
-    "adventure": "tourist_attraction",
-    "nightlife": "bar",
-    "shopping": "shopping_mall",
+    "attractions": "tourist attractions",
+    "museums": "museums",
+    "parks": "parks",
+    "adventure": "adventure activities",
+    "nightlife": "nightlife clubs",
+    "shopping": "shopping malls",
 }
 
-_VALID_SORT = {"rating", "user_ratings_total", "price_level", "score"}
+_VALID_SORT = {"rating", "user_ratings_total", "score"}
 
 # ─────────────────────────── Exceptions ─────────────────────────
 
@@ -46,23 +44,16 @@ class NoActivitiesFoundError(ActivityAgentError): pass
 
 @dataclass
 class Activity:
-    place_id: str
     name: str
     address: str
     latitude: float
     longitude: float
     rating: Optional[float]
     user_ratings_total: Optional[int]
-    price_level: Optional[int]
-    is_open: Optional[bool]
     types: list[str] = field(default_factory=list)
-
-    website: Optional[str] = None
-    phone: Optional[str] = None
     photo_reference: Optional[str] = None
 
     def score(self) -> float:
-        """Smart ranking score"""
         rating = self.rating or 0
         reviews = self.user_ratings_total or 0
         return rating * math.log(reviews + 1)
@@ -87,42 +78,22 @@ class TTLCache:
         if not val:
             return None
         data, expiry = val
-        if time.monotonic() > expiry:
+        if time.time() > expiry:
             return None
         return data
 
     def set(self, params, value):
-        self.store[self._key(params)] = (value, time.monotonic() + self.ttl)
-
-# ─────────────────────────── Retry ──────────────────────────────
-
-def with_retry(max_attempts=3):
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            delay = 1
-            for i in range(max_attempts):
-                try:
-                    return fn(*args, **kwargs)
-                except (Timeout, HTTPError, ApiException, ApiError) as e:
-                    if i == max_attempts - 1:
-                        raise APIError(e)
-                    time.sleep(delay)
-                    delay *= 2
-        return wrapper
-    return decorator
+        self.store[self._key(params)] = (value, time.time() + self.ttl)
 
 # ─────────────────────────── Validation ─────────────────────────
 
-def _validate(location, min_rating, max_results, radius, sort_by):
+def _validate(location, min_rating, max_results, sort_by):
     if not location or len(location) < 2:
         raise ValidationError("Invalid location")
     if not (0 <= min_rating <= 5):
         raise ValidationError("Invalid rating")
-    if not (1 <= max_results <= 60):
+    if not (1 <= max_results <= 20):
         raise ValidationError("Invalid max_results")
-    if not (500 <= radius <= 50000):
-        raise ValidationError("Invalid radius")
     if sort_by not in _VALID_SORT:
         raise ValidationError("Invalid sort_by")
 
@@ -130,29 +101,27 @@ def _validate(location, min_rating, max_results, radius, sort_by):
 
 class ActivityAgent:
 
+    BASE_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+
     def __init__(self):
-        key = os.getenv("GOOGLE_PLACES_API_KEY")
-        if not key:
+        self.api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+        if not self.api_key:
             raise EnvironmentError("Missing GOOGLE_PLACES_API_KEY")
 
-        self.client = googlemaps.Client(key=key)
         self.cache = TTLCache()
 
-    @with_retry()
-    def _geocode(self, location):
-        return self.client.geocode(location)[0]["geometry"]["location"]
+    def _call_api(self, params):
+        try:
+            response = requests.get(self.BASE_URL, params=params)
+            data = response.json()
 
-    @with_retry()
-    def _nearby(self, latlng, radius, type_):
-        return self.client.places_nearby(
-            location=latlng,
-            radius=radius,
-            type=type_
-        )
+            if data.get("status") not in ["OK", "ZERO_RESULTS"]:
+                raise APIError(data)
 
-    @with_retry()
-    def _details(self, place_id):
-        return self.client.place(place_id=place_id)["result"]
+            return data
+
+        except Exception as e:
+            raise APIError(e)
 
     def search(
         self,
@@ -160,32 +129,24 @@ class ActivityAgent:
         category: str = "attractions",
         min_rating: float = 0.0,
         max_results: int = 10,
-        radius: int = 5000,
         sort_by: str = "score",
-        include_details: bool = False,
     ):
-        _validate(location, min_rating, max_results, radius, sort_by)
+        _validate(location, min_rating, max_results, sort_by)
 
-        if category in CATEGORIES:
-            category = CATEGORIES[category]
+        query_type = CATEGORIES.get(category, category)
+        query = f"{query_type} in {location}"
 
-        params = locals()
+        params = {
+            "query": query,
+            "key": self.api_key
+        }
 
         cached = self.cache.get(params)
         if cached:
             return cached
 
-        latlng = self._geocode(location)
-
-        data = self._nearby(latlng, radius, category)
-
+        data = self._call_api(params)
         results = data.get("results", [])
-
-        # Pagination
-        while "next_page_token" in data and len(results) < max_results:
-            time.sleep(2)
-            data = self.client.places_nearby(page_token=data["next_page_token"])
-            results.extend(data.get("results", []))
 
         activities = []
 
@@ -197,23 +158,15 @@ class ActivityAgent:
             geo = place["geometry"]["location"]
 
             act = Activity(
-                place_id=place["place_id"],
                 name=place.get("name"),
-                address=place.get("vicinity"),
+                address=place.get("formatted_address"),
                 latitude=geo["lat"],
                 longitude=geo["lng"],
                 rating=rating,
                 user_ratings_total=place.get("user_ratings_total"),
-                price_level=place.get("price_level"),
-                is_open=place.get("opening_hours", {}).get("open_now"),
                 types=place.get("types", []),
                 photo_reference=(place.get("photos") or [{}])[0].get("photo_reference")
             )
-
-            if include_details:
-                details = self._details(act.place_id)
-                act.website = details.get("website")
-                act.phone = details.get("formatted_phone_number")
 
             activities.append(act)
 
@@ -223,18 +176,16 @@ class ActivityAgent:
         if not activities:
             raise NoActivitiesFoundError("No activities found")
 
-        # Sorting fix
-        activities.sort(
-            key=lambda a: (
-                getattr(a, sort_by) is None,
-                getattr(a, sort_by)() if callable(getattr(a, sort_by, None)) else getattr(a, sort_by)
-            ),
-            reverse=True
-        )
+        # Sorting
+        if sort_by == "rating":
+            activities.sort(key=lambda x: x.rating or 0, reverse=True)
+        elif sort_by == "user_ratings_total":
+            activities.sort(key=lambda x: x.user_ratings_total or 0, reverse=True)
+        else:
+            activities.sort(key=lambda x: x.score(), reverse=True)
 
         self.cache.set(params, activities)
         return activities
-
 
 # ─────────────────────────── Helper ─────────────────────────────
 
@@ -244,4 +195,5 @@ def get_activities(location, **kwargs):
     global _agent
     if _agent is None:
         _agent = ActivityAgent()
+
     return [a.to_dict() for a in _agent.search(location, **kwargs)]
