@@ -1,7 +1,9 @@
 import requests
 import json
 
-# Ollama call
+
+# ─────────────────────────── Ollama Call ───────────────────────────
+
 def call_ollama(prompt):
     try:
         response = requests.post(
@@ -9,78 +11,153 @@ def call_ollama(prompt):
             json={
                 "model": "mistral",
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 1600
+                },
             },
-            timeout=60
+            timeout=180,
         )
 
         result = response.json()["response"].strip()
-
-        return result  # keep as text (same as OpenAI behavior)
+        return result
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        print("Ollama Error:", e)
+        return ""
 
 
-def generate_itinerary(destination: str, days: int, budget: str = "budget", interests: list = None) -> dict:
+# ─────────────────────────── FIXED PARSER ───────────────────────────
+
+def parse_itinerary(text):
+    days = []
+    current_day = None
+    current_section = None
+
+    for line in text.split("\n"):
+        line = line.strip()
+
+        if not line:
+            continue
+
+        lower = line.lower()
+
+        # Detect DAY
+        if "day" in lower:
+            if current_day:
+                days.append(current_day)
+
+            current_day = {
+                "day": len(days) + 1,
+                "morning": "",
+                "afternoon": "",
+                "evening": "",
+            }
+            current_section = None
+
+        elif "morning" in lower:
+            current_section = "morning"
+
+        elif "afternoon" in lower:
+            current_section = "afternoon"
+
+        elif "evening" in lower:
+            current_section = "evening"
+
+        elif current_section:
+            clean_line = line.replace("•", "").strip()
+            current_day[current_section] += clean_line + " "
+
+    if current_day:
+        days.append(current_day)
+
+    return days
+
+
+# ─────────────────────────── MAIN FUNCTION ───────────────────────────
+
+def generate_itinerary(
+    destination: str,
+    days: int,
+    budget: str = "budget",
+    interests: list = None
+) -> dict:
 
     interests_str = ", ".join(interests) if interests else "general sightseeing"
 
-    system_prompt = """You are an expert travel planner specializing in student and budget travel. 
-    You provide detailed, practical, and realistic travel itineraries.
-    Always include specific place names, estimated costs, and practical tips.
-    Format your response in clear sections."""
-
-    user_prompt = f"""
-    Plan a {days}-day trip to {destination} for a student traveler.
-
-    Trip Details:
-    - Duration: {days} days
-    - Budget Level: {budget}
-    - Interests: {interests_str}
-
-    Please provide:
-
-    1. TRIP OVERVIEW
-       - Best time to visit
-       - Estimated total budget range
-       - Getting there (transport options)
-
-    2. DAY-BY-DAY ITINERARY
-       For each day include:
-       - Morning / Afternoon / Evening activities
-       - Specific places to visit with brief descriptions
-       - Estimated time at each place
-
-    3. TOP MUST-VISIT PLACES (with entry fees if any)
-
-    4. FOOD GUIDE
-       - Must-try local dishes
-       - Recommended budget-friendly restaurants/street food spots
-       - Estimated meal costs
-
-    5. ACCOMMODATION OPTIONS
-       - Budget hostels/guesthouses
-       - Estimated cost per night
-
-    6. PRACTICAL TRAVEL TIPS
-       - Local transport options & costs
-       - Safety tips
-       - Cultural etiquette
-       - Packing essentials
-
-    7. ESTIMATED BUDGET BREAKDOWN
-       - Accommodation, food, transport, activities (per day)
-
-    Make it practical, fun, and student-friendly!
-    """
-
     try:
-        #  Merge prompts (important for Ollama)
-        full_prompt = system_prompt + "\n\n" + user_prompt
+        # ✅ UPDATED STRICT PROMPT
+        full_prompt = f"""
+You are a STRICT travel itinerary generator.
 
-        # Replace OpenAI call
-        itinerary_text = call_ollama(full_prompt) or "No itinerary generated."
+Generate EXACTLY {days} days for {destination}.
+
+STRICT RULES (DO NOT BREAK):
+- Output EXACTLY {days} days (not more, not less)
+- Each day MUST have:
+  - Morning (at least 1 activity)
+  - Afternoon (at least 1 activity)
+  - Evening (at least 1 activity)
+- NO section can be empty
+- DO NOT skip any section
+- DO NOT stop early
+
+FORMAT:
+
+=== DAY 1 ===
+Morning:
+• Activity - short description - approx cost ₹X
+
+Afternoon:
+• Activity - short description - approx cost ₹X
+
+Evening:
+• Activity - short description - approx cost ₹X
+
+Continue until DAY {days}
+
+IMPORTANT:
+- Each activity on NEW LINE
+- Always include cost
+- Keep same detail level for ALL days
+- DO NOT generate extra days
+- Focus on: {interests_str}
+"""
+
+        itinerary_text = call_ollama(full_prompt)
+
+        if not itinerary_text:
+            return {
+                "success": False,
+                "error": "Empty response from model",
+                "destination": destination,
+                "days": days,
+            }
+
+        # ✅ Parse
+        structured_itinerary = parse_itinerary(itinerary_text)
+
+        # ✅ FIX 1: Limit extra days
+        structured_itinerary = structured_itinerary[:days]
+
+        # ✅ FIX 2: Fill missing sections
+        for day_item in structured_itinerary:
+            if not day_item["morning"]:
+                day_item["morning"] = "Explore local attractions and nearby landmarks"
+            if not day_item["afternoon"]:
+                day_item["afternoon"] = "Visit popular spots and enjoy local experiences"
+            if not day_item["evening"]:
+                day_item["evening"] = "Relax with dinner and explore nightlife"
+
+        # 🚨 Fallback if parsing fails
+        if not structured_itinerary:
+            structured_itinerary = [{
+                "day": 1,
+                "morning": itinerary_text[:200],
+                "afternoon": "",
+                "evening": ""
+            }]
 
         return {
             "success": True,
@@ -88,12 +165,13 @@ def generate_itinerary(destination: str, days: int, budget: str = "budget", inte
             "days": days,
             "budget": budget,
             "interests": interests or [],
-            "itinerary": itinerary_text,
-            "tokens_used": None,   # ❌ not available in Ollama
-            "model": "mistral"     # ✅ manually set
+            "itinerary": structured_itinerary,
+            "raw_itinerary": itinerary_text,
+            "model": "mistral"
         }
 
     except Exception as e:
+        print("Planner Error:", e)
         return {
             "success": False,
             "error": str(e),
@@ -102,60 +180,28 @@ def generate_itinerary(destination: str, days: int, budget: str = "budget", inte
         }
 
 
-def display_itinerary(result: dict) -> None:
+# ─────────────────────────── CLI TEST ───────────────────────────
+
+def display_itinerary(result: dict):
     if not result["success"]:
-        print(f"Error generating itinerary: {result['error']}")
+        print("Error:", result.get("error"))
         return
 
-    print("\n" + "="*60)
-    print(f" TRAVEL ITINERARY: {result['destination'].upper()}")
-    print(f" Duration: {result['days']} days | 💰 Budget: {result['budget'].title()}")
+    print("\n=== TRAVEL PLAN ===")
 
-    if result["interests"]:
-        print(f" Interests: {', '.join(result['interests'])}")
-
-    print("="*60)
-    print(result["itinerary"])
-    print("="*60)
-    print(f" Tokens used: {result['tokens_used']} | Model: {result['model']}")
-    print("="*60 + "\n")
-
-
-def interactive_planner():
-    print("\n Welcome to AI Travel Planner!")
-    print("-" * 40)
-
-    destination = input("Enter your destination: ").strip()
-    if not destination:
-        print(" Destination cannot be empty.")
-        return
-
-    try:
-        days = int(input("Number of days: ").strip())
-        if days <= 0:
-            raise ValueError
-    except ValueError:
-        print(" Please enter a valid number of days.")
-        return
-
-    print("Budget options: budget / mid-range / luxury")
-    budget = input("Budget level (default: budget): ").strip().lower() or "budget"
-    if budget not in ["budget", "mid-range", "luxury"]:
-        budget = "budget"
-
-    interests_input = input("Your interests (e.g. food, history, hiking): ").strip()
-    interests = [i.strip() for i in interests_input.split(",")] if interests_input else []
-
-    print("\n⏳ Generating your personalized itinerary...\n")
-    result = generate_itinerary(destination, days, budget, interests)
-    display_itinerary(result)
+    for day in result["itinerary"]:
+        print(f"\nDay {day['day']}")
+        print("Morning:", day["morning"])
+        print("Afternoon:", day["afternoon"])
+        print("Evening:", day["evening"])
 
 
 if __name__ == "__main__":
     result = generate_itinerary(
-        destination="Bali, Indonesia",
-        days=5,
-        budget="budget",
-        interests=["beaches", "temples", "food", "surfing"]
+        destination="Udaipur",
+        days=4,
+        budget="mid-range",
+        interests=["culture", "food"]
     )
+
     display_itinerary(result)
