@@ -36,11 +36,15 @@ class TripResponse(BaseModel):
     budget: str
     interests: list[str]
 
-    # ✅ FIX: allow BOTH string or structured list
+    # ✅ allow structured itinerary
     itinerary: Optional[Any] = None
 
     error: Optional[str] = None
     budget_breakdown: Optional[dict] = None
+
+    # 🔥 ADD THIS (for flights)
+    flights: Optional[list] = None
+
 
 # --- Routes ---
 
@@ -76,6 +80,7 @@ def plan_trip(data: TripRequest = Body(...)):
                 "interests": data.interests,
                 "itinerary": None,
                 "budget_breakdown": None,
+                "flights": [],   # ✅ added
                 "error": result.get("error", "Pipeline failed")
             }
 
@@ -86,11 +91,14 @@ def plan_trip(data: TripRequest = Body(...)):
             "budget": data.budget,
             "interests": data.interests,
             "itinerary": result.get("itinerary"),
-            "budget_breakdown": result.get("budget_breakdown")
+            "budget_breakdown": result.get("budget_breakdown"),
+
+            # 🔥 THIS IS THE KEY FIX
+            "flights": result.get("flights", [])
         }
 
     except Exception as e:
-        print("ERROR:", str(e))  # 👈 critical debug
+        print("ERROR:", str(e))
 
         return {
             "success": False,
@@ -100,5 +108,6 @@ def plan_trip(data: TripRequest = Body(...)):
             "interests": data.interests,
             "itinerary": None,
             "budget_breakdown": None,
+            "flights": [],   # ✅ added
             "error": str(e)
         }
