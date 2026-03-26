@@ -1,10 +1,9 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import uvicorn
 
-# ✅ NEW: Use orchestrator instead of individual agents
 from orchestrator import run_trip_pipeline
 
 app = FastAPI(
@@ -13,7 +12,7 @@ app = FastAPI(
     version="3.0.0"
 )
 
-# Allow frontend to talk to backend
+# ✅ CORS (correct)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,34 +21,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Request & Response Models ---
-
+# --- Request Model ---
 class TripRequest(BaseModel):
-    destination: str = Field(..., min_length=2, description="Travel destination")
-    days: int = Field(..., gt=0, le=30, description="Number of days (1–30)")
-    budget: Optional[str] = Field("budget", description="budget | mid-range | luxury")
-    interests: Optional[list[str]] = Field(default_factory=list, description="List of interests")
+    destination: str = Field(..., min_length=2)
+    days: int = Field(..., gt=0, le=30)
+    budget: Optional[str] = "budget"
+    interests: Optional[list[str]] = []
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "destination": "Bali, Indonesia",
-                "days": 5,
-                "budget": "budget",
-                "interests": ["beaches", "temples", "food"]
-            }
-        }
-
+# --- FIXED Response Model ---
 class TripResponse(BaseModel):
     success: bool
     destination: str
     days: int
     budget: str
     interests: list[str]
-    itinerary: Optional[str] = None
-    error: Optional[str] = None
-    budget_breakdown: Optional[dict] = None  
 
+    # ✅ FIX: allow BOTH string or structured list
+    itinerary: Optional[Any] = None
+
+    error: Optional[str] = None
+    budget_breakdown: Optional[dict] = None
 
 # --- Routes ---
 
@@ -61,15 +52,53 @@ def home():
         "status": "healthy"
     }
 
-
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "VoyraAI"}
 
-
 @app.post("/plan-trip", response_model=TripResponse)
 def plan_trip(data: TripRequest = Body(...)):
-    """
-    Generate a personalized travel itinerary using multi-agent pipeline.
-    """
+    try:
+        result = run_trip_pipeline(
+            destination=data.destination,
+            days=data.days,
+            budget=data.budget,
+            interests=data.interests
+        )
 
+        # ✅ FIX: check pipeline success
+        if not result.get("success"):
+            return {
+                "success": False,
+                "destination": data.destination,
+                "days": data.days,
+                "budget": data.budget,
+                "interests": data.interests,
+                "itinerary": None,
+                "budget_breakdown": None,
+                "error": result.get("error", "Pipeline failed")
+            }
+
+        return {
+            "success": True,
+            "destination": data.destination,
+            "days": data.days,
+            "budget": data.budget,
+            "interests": data.interests,
+            "itinerary": result.get("itinerary"),
+            "budget_breakdown": result.get("budget_breakdown")
+        }
+
+    except Exception as e:
+        print("ERROR:", str(e))  # 👈 critical debug
+
+        return {
+            "success": False,
+            "destination": data.destination,
+            "days": data.days,
+            "budget": data.budget,
+            "interests": data.interests,
+            "itinerary": None,
+            "budget_breakdown": None,
+            "error": str(e)
+        }
