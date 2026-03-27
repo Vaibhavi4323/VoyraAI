@@ -8,10 +8,12 @@ from planner_agent import generate_itinerary
 # ✅ ENABLE ONLY FLIGHT AGENT
 from flight_agent import get_flights
 
+# 🔥 ENABLE HOTEL AGENT
+from hotel_agent import get_hotels
+
 # from budget_agent import optimize_budget
 # from enhancer_agent import enhance_itinerary
 
-# from hotel_agent import get_hotels
 # from activity_agent import get_activities
 
 
@@ -76,6 +78,7 @@ def run_trip_pipeline(
         dest_code = get_iata(destination)
 
         flights = []
+        hotels = []  # ✅ IMPORTANT
 
         # ───────────────── Step 1: Planner ─────────────────
         plan = generate_itinerary(destination, days, budget, interests)
@@ -85,7 +88,7 @@ def run_trip_pipeline(
 
         itinerary_text = plan["itinerary"]
 
-        # ───────────────── Step 2: Flights (ONLY FIXED PART) ─────────────────
+        # ───────────────── Step 2: Flights ─────────────────
         if origin_code and dest_code:
             try:
                 flights_raw = get_flights(
@@ -100,27 +103,29 @@ def run_trip_pipeline(
                     budget_per_person=total_budget * 0.4
                 )
 
-                print("FLIGHTS:", flights)  # ✅ DEBUG
+                print("FLIGHTS:", flights)
 
             except Exception as e:
                 print("Flight Agent Error:", e)
                 flights = []
 
-        # ───────────────── Step 3: Hotels ─────────────────
-        # try:
-        #     hotels_raw = get_hotels(
-        #         location=destination,
-        #         max_results=10
-        #     )
+        # ───────────────── Step 3: Hotels (🔥 FIXED) ─────────────────
+        try:
+            hotels_raw = get_hotels(
+                city=destination,   # ✅ FIX: correct param name
+                max_results=6
+            )
 
-        #     hotels = filter_hotels_by_budget(
-        #         hotels_raw,
-        #         budget_per_day=total_budget / max(days, 1)
-        #     )
+            hotels = filter_hotels_by_budget(
+                hotels_raw,
+                budget_per_day=total_budget / max(days, 1)
+            )
 
-        # except Exception as e:
-        #     print("Hotel Agent Error:", e)
-        #     hotels = []
+            print("HOTELS:", hotels)  # ✅ DEBUG
+
+        except Exception as e:
+            print("Hotel Agent Error:", e)
+            hotels = []
 
         # ───────────────── Step 4: Activities ─────────────────
         # try:
@@ -169,9 +174,8 @@ def run_trip_pipeline(
             "itinerary": final_itinerary,
             "budget_breakdown": None,
 
-            # ✅ ONLY CHANGE THAT MATTERS
             "flights": flights,
-            "hotels": [],
+            "hotels": hotels,   # 🔥 THIS WAS MISSING
             "activities": []
         }
 
