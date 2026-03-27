@@ -28,7 +28,7 @@ class TripRequest(BaseModel):
     budget: Optional[str] = "budget"
     interests: Optional[list[str]] = []
 
-# --- FIXED Response Model ---
+# --- Response Model ---
 class TripResponse(BaseModel):
     success: bool
     destination: str
@@ -36,14 +36,16 @@ class TripResponse(BaseModel):
     budget: str
     interests: list[str]
 
-    # ✅ allow structured itinerary
     itinerary: Optional[Any] = None
 
     error: Optional[str] = None
     budget_breakdown: Optional[dict] = None
 
-    # 🔥 ADD THIS (for flights)
+    # ✅ Existing
     flights: Optional[list] = None
+
+    # 🔥 NEW: add hotels
+    hotels: Optional[list] = None
 
 
 # --- Routes ---
@@ -70,7 +72,7 @@ def plan_trip(data: TripRequest = Body(...)):
             interests=data.interests
         )
 
-        # ✅ FIX: check pipeline success
+        # ✅ Handle pipeline failure
         if not result.get("success"):
             return {
                 "success": False,
@@ -80,7 +82,8 @@ def plan_trip(data: TripRequest = Body(...)):
                 "interests": data.interests,
                 "itinerary": None,
                 "budget_breakdown": None,
-                "flights": [],   # ✅ added
+                "flights": [],
+                "hotels": [],   # ✅ added
                 "error": result.get("error", "Pipeline failed")
             }
 
@@ -93,8 +96,11 @@ def plan_trip(data: TripRequest = Body(...)):
             "itinerary": result.get("itinerary"),
             "budget_breakdown": result.get("budget_breakdown"),
 
-            # 🔥 THIS IS THE KEY FIX
-            "flights": result.get("flights", [])
+            # ✅ Existing
+            "flights": result.get("flights", []),
+
+            # 🔥 NEW: hotels
+            "hotels": result.get("hotels", [])
         }
 
     except Exception as e:
@@ -108,6 +114,7 @@ def plan_trip(data: TripRequest = Body(...)):
             "interests": data.interests,
             "itinerary": None,
             "budget_breakdown": None,
-            "flights": [],   # ✅ added
+            "flights": [],
+            "hotels": [],   # ✅ added
             "error": str(e)
         }
