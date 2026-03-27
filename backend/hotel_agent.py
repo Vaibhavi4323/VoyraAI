@@ -1,27 +1,14 @@
 # backend/hotel_agent.py
 
-from __future__ import annotations
-
-import hashlib
-import logging
-import os
-import time
-from dataclasses import asdict, dataclass
-from functools import wraps
-from typing import Optional
-
 import requests
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─────────────────────────── Logging ────────────────────────────
+API_KEY = os.getenv("OPENTRIPMAP_API_KEY")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("hotel_agent")
+BASE_URL = "https://api.opentripmap.com/0.1/en/places/radius"
 
 # ─────────────────────────── Exceptions ─────────────────────────
 
@@ -109,42 +96,37 @@ class HotelAgent:
             "key": self.api_key
         }
 
-        cached = self.cache.get(params)
-        if cached:
-            return cached
+        geo_res = requests.get(geo_url, params=geo_params).json()
 
-        data = self._call_api(params)
+        lat = geo_res.get("lat")
+        lon = geo_res.get("lon")
 
-        if not data:
-            raise NoHotelsFoundError(f"No hotels found in {city}")
+        if not lat or not lon:
+            return []
+
+        # Step 2: Search hotels
+        params = {
+            "radius": radius,
+            "lon": lon,
+            "lat": lat,
+            "kinds": "accomodations",  # hotel category
+            "limit": limit,
+            "apikey": API_KEY
+        }
+
+        res = requests.get(BASE_URL, params=params).json()
 
         hotels = []
 
-        for place in data:
-            try:
-                rating = place.get("rating")
+        for h in res.get("features", []):
+            prop = h["properties"]
 
-                if min_rating and (rating is None or rating < min_rating):
-                    continue
-
-                h = Hotel(
-                    name=place.get("name"),
-                    address=place.get("formatted_address"),
-                    rating=rating,
-                    total_reviews=place.get("user_ratings_total"),
-                    latitude=place["geometry"]["location"]["lat"],
-                    longitude=place["geometry"]["location"]["lng"]
-                )
-
-                hotels.append(h)
-
-                if len(hotels) >= max_results:
-                    break
-
-            except Exception:
-                continue
-
-        self.cache.set(params, hotels)
+            hotels.append({
+                "name": prop.get("name"),
+                "rating": prop.get("rate"),
+                "lat": h["geometry"]["coordinates"][1],
+                "lon": h["geometry"]["coordinates"][0]
+            })
 
         return hotels
 

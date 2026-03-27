@@ -17,7 +17,7 @@ def call_ollama(prompt):
                     "num_predict": 1600
                 },
             },
-            timeout=180,
+            timeout=500,
         )
 
         result = response.json()["response"].strip()
