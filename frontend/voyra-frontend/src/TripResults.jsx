@@ -1,4 +1,5 @@
 import ItineraryCard from "./ItineraryCard";
+import FlightCard from "./FlightCard"; // ✅ ADD THIS
 
 function TripResults({ result }) {
   if (!result) return null;
@@ -6,8 +7,6 @@ function TripResults({ result }) {
   return (
     <div style={{ marginTop: "30px" }}>
       <h2>Trip Plan for {result.destination}</h2>
-
-      
 
       {/* Itinerary Section */}
       <div
@@ -30,15 +29,29 @@ function TripResults({ result }) {
           ))}
       </div>
 
-      {/* Flights */}
+      {/* ✅ FIXED Flights Section */}
       {result.flights && result.flights.length > 0 && (
         <div style={{ marginTop: "30px" }}>
           <h3>Flights</h3>
+
           {result.flights.map((f, i) => (
-            <p key={i}>
-              {f.airline} | ₹{f.price} | {f.departure_airport} →{" "}
-              {f.arrival_airport}
-            </p>
+            <FlightCard
+              key={i}
+              flight={{
+                airline: f.airline || "Unknown Airline",
+                from: f.departure_airport || "N/A",
+                to: f.arrival_airport || "N/A",
+
+                // ⚠️ aviationstack DOES NOT GIVE PRICE → fallback
+                price: f.price ? `₹${f.price}` : "N/A",
+
+                // fallback duration (not available in API)
+                duration:
+                  f.departure_time && f.arrival_time
+                    ? `${f.departure_time} → ${f.arrival_time}`
+                    : "Duration not available",
+              }}
+            />
           ))}
         </div>
       )}
