@@ -5,7 +5,8 @@ import os
 from typing import Optional
 from dataclasses import dataclass
 from dotenv import load_dotenv
-load_dotenv(dotenv_path="backend/.env")
+from dataclasses import dataclass
+from typing import Optional
 
 load_dotenv()
 
@@ -62,12 +63,13 @@ class TTLCache:
 class HotelAgent:
 
     BASE_URL = "https://api.opentripmap.com/0.1/en/places/radius"
+    BASE_URL = "https://api.opentripmap.com/0.1/en/places/radius"
 
     def __init__(self):
         self.api_key = os.getenv("OPENTRIPMAP_API_KEY")
-        print("HOTEL API KEY:", self.api_key)
 
         if not self.api_key:
+            raise ValueError("OPENTRIPMAP_API_KEY not set")
             raise ValueError("OPENTRIPMAP_API_KEY not set")
 
         self.cache = TTLCache()
@@ -125,8 +127,9 @@ class HotelAgent:
             "radius": 5000,
             "lon": lon,
             "lat": lat,
-            "apikey": self.api_key,
-            "kinds": "accomodations"
+            "kinds": "interesting places",  # hotel category
+            "limit": limit,
+            "apikey": self.api_key
         }
 
         data = self._call_api(api_params)

@@ -1,14 +1,11 @@
-# backend/flight_agent.py
-
 from __future__ import annotations
 
 import hashlib
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
-from functools import wraps
+from dataclasses import asdict, dataclass
+from datetime import date
 from typing import Optional
 
 import requests
@@ -121,6 +118,14 @@ class FlightAgent:
     def _call_api(self, params):
         try:
             response = requests.get(self.BASE_URL, params=params)
+
+            # 🔍 DEBUG LOGS
+            print("\n===== AVIATIONSTACK DEBUG =====")
+            print("URL:", response.url)
+            print("STATUS:", response.status_code)
+            print("RESPONSE:", response.text[:500])
+            print("================================\n")
+
             data = response.json()
 
             if "error" in data:
@@ -144,11 +149,9 @@ class FlightAgent:
 
         _validate(origin, destination, departure_date)
 
+        # ❌ Removed flight_date (free plan issue)
         params = {
-            "access_key": self.api_key,
-            "dep_iata": origin,
-            "arr_iata": destination,
-            "flight_date": departure_date
+            "access_key": self.api_key
         }
 
         cached = self.cache.get(params)
@@ -158,25 +161,39 @@ class FlightAgent:
         data = self._call_api(params)
 
         if not data:
-            raise NoFlightsFoundError("No flights found")
+            raise NoFlightsFoundError("No flights returned from API")
+
+        # ✅ Manual filtering (IMPORTANT)
+        filtered = [
+            f for f in data
+            if f.get("departure", {}).get("iata") == origin
+            and f.get("arrival", {}).get("iata") == destination
+        ]
+
+        if not filtered:
+            raise NoFlightsFoundError("No matching flights found")
 
         flights = []
 
-        for f in data[:max_results]:
+        for f in filtered[:max_results]:
             try:
                 flight = Flight(
-                    airline=f["airline"]["name"],
-                    flight_number=f["flight"]["iata"],
-                    departure_airport=f["departure"]["iata"],
-                    arrival_airport=f["arrival"]["iata"],
-                    departure_time=f["departure"]["scheduled"],
-                    arrival_time=f["arrival"]["scheduled"],
-                    status=f["flight_status"]
+                    airline=f.get("airline", {}).get("name", "Unknown"),
+                    flight_number=f.get("flight", {}).get("iata", "N/A"),
+                    departure_airport=f.get("departure", {}).get("iata", "N/A"),
+                    arrival_airport=f.get("arrival", {}).get("iata", "N/A"),
+                    departure_time=f.get("departure", {}).get("scheduled", "N/A"),
+                    arrival_time=f.get("arrival", {}).get("scheduled", "N/A"),
+                    status=f.get("flight_status", "unknown")
                 )
                 flights.append(flight)
 
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Skipping invalid flight data: {e}")
                 continue
+
+        if not flights:
+            raise NoFlightsFoundError("No valid flights after parsing")
 
         self.cache.set(params, flights)
 
