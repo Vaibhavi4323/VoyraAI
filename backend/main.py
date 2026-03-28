@@ -43,9 +43,10 @@ class TripResponse(BaseModel):
 
     # ✅ Existing
     flights: Optional[list] = None
-
-    # 🔥 NEW: add hotels
     hotels: Optional[list] = None
+
+    # 🔥 NEW: activities
+    activities: Optional[list] = None
 
 
 # --- Routes ---
@@ -83,7 +84,8 @@ def plan_trip(data: TripRequest = Body(...)):
                 "itinerary": None,
                 "budget_breakdown": None,
                 "flights": [],
-                "hotels": [],   # ✅ added
+                "hotels": [],
+                "activities": [],  # ✅ ADDED
                 "error": result.get("error", "Pipeline failed")
             }
 
@@ -98,9 +100,10 @@ def plan_trip(data: TripRequest = Body(...)):
 
             # ✅ Existing
             "flights": result.get("flights", []),
+            "hotels": result.get("hotels", []),
 
-            # 🔥 NEW: hotels
-            "hotels": result.get("hotels", [])
+            # 🔥 NEW
+            "activities": result.get("activities", [])
         }
 
     except Exception as e:
@@ -115,6 +118,7 @@ def plan_trip(data: TripRequest = Body(...)):
             "itinerary": None,
             "budget_breakdown": None,
             "flights": [],
-            "hotels": [],   # ✅ added
+            "hotels": [],
+            "activities": [],  # ✅ ADDED
             "error": str(e)
         }

@@ -3,6 +3,7 @@
 import requests
 import os
 from dotenv import load_dotenv
+load_dotenv(dotenv_path="backend/.env")
 
 load_dotenv()
 
@@ -58,25 +59,39 @@ class TTLCache:
 
 class HotelAgent:
 
-    BASE_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    BASE_URL = "https://api.opentripmap.com/0.1/en/places/radius"
 
     def __init__(self):
-        self.api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+        self.api_key = os.getenv("OPENTRIPMAP_API_KEY")
+        print("HOTEL API KEY:", self.api_key)
 
         if not self.api_key:
-            raise ValueError("GOOGLE_PLACES_API_KEY not set")
+            raise ValueError("OPENTRIPMAP_API_KEY not set")
 
         self.cache = TTLCache()
+
+    # ✅ NEW: Get city coordinates first
+    def _get_coordinates(self, city):
+        url = "https://api.opentripmap.com/0.1/en/places/geoname"
+        params = {
+            "name": city,
+            "apikey": self.api_key
+        }
+
+        res = requests.get(url, params=params).json()
+
+        if "lat" not in res or "lon" not in res:
+            raise APIError("Could not fetch city coordinates")
+
+        return res["lat"], res["lon"]
 
     def _call_api(self, params):
         try:
             response = requests.get(self.BASE_URL, params=params)
             data = response.json()
 
-            if data.get("status") != "OK":
-                raise APIError(data)
-
-            return data.get("results", [])
+            # OpenTripMap returns "features"
+            return data.get("features", [])
 
         except Exception as e:
             raise APIError(e)
@@ -88,12 +103,8 @@ class HotelAgent:
         min_rating: Optional[float] = None
     ):
 
-        # ✅ IMPROVED QUERY
-        query = f"best hotels in {city}"
-
         params = {
-            "query": query,
-            "key": self.api_key
+            "city": city
         }
 
         geo_res = requests.get(geo_url, params=geo_params).json()
@@ -104,29 +115,53 @@ class HotelAgent:
         if not lat or not lon:
             return []
 
-        # Step 2: Search hotels
-        params = {
-            "radius": radius,
+        # ✅ FIX: Get coordinates
+        lat, lon = self._get_coordinates(city)
+
+        # ✅ FIX: Correct params for radius API
+        api_params = {
+            "radius": 5000,
             "lon": lon,
             "lat": lat,
-            "kinds": "accomodations",  # hotel category
-            "limit": limit,
-            "apikey": API_KEY
+            "apikey": self.api_key,
+            "kinds": "accomodations"
         }
 
-        res = requests.get(BASE_URL, params=params).json()
+        data = self._call_api(api_params)
+
+        if not data:
+            raise NoHotelsFoundError(f"No hotels found in {city}")
 
         hotels = []
 
-        for h in res.get("features", []):
-            prop = h["properties"]
+        for place in data:
+            try:
+                props = place.get("properties", {})
+                geometry = place.get("geometry", {}).get("coordinates", [0, 0])
 
-            hotels.append({
-                "name": prop.get("name"),
-                "rating": prop.get("rate"),
-                "lat": h["geometry"]["coordinates"][1],
-                "lon": h["geometry"]["coordinates"][0]
-            })
+                rating = props.get("rate")
+
+                if min_rating and (rating is None or rating < min_rating):
+                    continue
+
+                h = Hotel(
+                    name=props.get("name"),
+                    address=props.get("address", {}).get("road", city),
+                    rating=rating,
+                    total_reviews=None,
+                    latitude=geometry[1],
+                    longitude=geometry[0]
+                )
+
+                hotels.append(h)
+
+                if len(hotels) >= max_results:
+                    break
+
+            except Exception:
+                continue
+
+        self.cache.set(params, hotels)
 
         return hotels
 
@@ -141,7 +176,7 @@ def get_hotels(city, **kwargs):
 
     hotels = _agent.search(city, **kwargs)
 
-    # ✅ NEW: Normalize for frontend
+    # ✅ Normalize for frontend (UNCHANGED)
     formatted_hotels = []
 
     for h in hotels:
@@ -149,11 +184,10 @@ def get_hotels(city, **kwargs):
             "name": h.name,
             "location": h.address,
             "rating": h.rating,
-            "price": "N/A",  # API doesn't provide price
+            "price": "N/A",
             "image": "https://via.placeholder.com/300"
         })
 
-    # ✅ NEW: fallback (prevents empty UI)
     if not formatted_hotels:
         formatted_hotels = [
             {
@@ -166,8 +200,3 @@ def get_hotels(city, **kwargs):
         ]
 
     return formatted_hotels
-
-
-'''
-print("API KEY:", os.getenv("GOOGLE_PLACES_API_KEY"))
-'''
