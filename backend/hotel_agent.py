@@ -2,6 +2,8 @@
 
 import requests
 import os
+from typing import Optional
+from dataclasses import dataclass
 from dotenv import load_dotenv
 load_dotenv(dotenv_path="backend/.env")
 
