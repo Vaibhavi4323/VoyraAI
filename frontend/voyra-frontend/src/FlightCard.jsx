@@ -1,5 +1,3 @@
-import { Plane, ArrowRight } from "lucide-react";
-
 function FlightCard({ flight }) {
   return (
     <div
@@ -25,22 +23,28 @@ function FlightCard({ flight }) {
             background: "#e0edff"
           }}
         >
-          <Plane size={18} color="#2563eb" />
+          ✈️
         </div>
 
         <div>
-          <p style={{ fontWeight: "600", margin: 0 }}>{flight.airline}</p>
+          <p style={{ fontWeight: "600", margin: 0 }}>
+            {flight.airline}
+          </p>
           <p style={{ fontSize: "12px", color: "#6b7280", margin: 0 }}>
-            {flight.duration || "N/A"}
+            {flight.duration || "Duration not available"}
           </p>
         </div>
       </div>
 
       {/* Middle Section */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span style={{ fontWeight: "500" }}>{flight.from}</span>
-        <ArrowRight size={14} color="#9ca3af" />
-        <span style={{ fontWeight: "500" }}>{flight.to}</span>
+        <span style={{ fontWeight: "500" }}>
+          {flight.from || "N/A"}
+        </span>
+        <span>➡️</span>
+        <span style={{ fontWeight: "500" }}>
+          {flight.to || "N/A"}
+        </span>
       </div>
 
       {/* Right Section */}
@@ -53,7 +57,7 @@ function FlightCard({ flight }) {
             margin: 0
           }}
         >
-          ₹{flight.price || "N/A"}
+          {flight.price || "N/A"}
         </p>
         <p style={{ fontSize: "12px", color: "#6b7280", margin: 0 }}>
           per person

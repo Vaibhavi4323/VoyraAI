@@ -13,6 +13,7 @@ from typing import Optional
 
 import requests
 from dotenv import load_dotenv
+load_dotenv(dotenv_path="backend/.env")
 
 load_dotenv()
 
@@ -111,6 +112,7 @@ class FlightAgent:
 
     def __init__(self):
         self.api_key = os.getenv("AVIATIONSTACK_API_KEY")
+        print("AVIATION KEY:", self.api_key)
         if not self.api_key:
             raise ValueError("AVIATIONSTACK_API_KEY not set")
 
