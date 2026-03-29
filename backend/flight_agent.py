@@ -27,11 +27,11 @@ logger = logging.getLogger("flight_agent")
 CITY_TO_AIRPORT = {
     "delhi": "DEL",
     "mumbai": "BOM",
-    "goa": "GOI",
+    "goa": "GOA",
     "bangalore": "BLR",
     "hyderabad": "HYD",
-    "chennai": "MAA",
-    "kolkata": "CCU"
+    "chennai": "CHE",
+    "kolkata": "KOL"
 }
 
 # ─────────────────────────── Exceptions ─────────────────────────
